@@ -1,10 +1,17 @@
 #!/bin/bash
+#
+# @battery233
+#
+# Purpose: create video with alpha channel from sequential frames
+
 ##################### Doc #####################
 # args
 # $1 .zip location
 # $2 fps
 # $3 bit rate (K/s)
 # $4 ffmpeg bin location
+# $5 output file location (required if audio is specified)
+# $6 audio file (if needed)
 
 # error code
 # 0:ok
@@ -21,8 +28,8 @@ while getopts ":h" optname; do
   case "$optname" in
   "h")
     echo "createVideoWithAlphaChannel can convert sequential frames (PNG) with alpha channel into an mp4 video with separated RGB&A views (for Android/IOS)"
-    printf 'Args: ./createVideoWithAlphaChannel.sh <.zip which contains the frames> <FPS> <bit rate> <ffmpeg bin location>\n'
-    echo "e.g.: ./createVideoWithAlphaChannel.sh demo.zip 25 3000 /usr/local/bin/ffmpeg"
+    printf 'Args: ./createVideoWithAlphaChannel.sh <.zip which contains the frames> <FPS> <bit rate> <ffmpeg bin location> <out put dir> [audioFile]\n'
+    echo "e.g.: ./createVideoWithAlphaChannel.sh demo.zip 25 3000 /usr/local/bin/ffmpeg . audio.acc"
     exit 0
     ;;
   *)
@@ -89,9 +96,9 @@ else
   exit 1
 fi
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  rm -rf "$tmpLocation"/__MACOSX
-fi
+# if [[ "$OSTYPE" == "darwin"* ]]; then
+rm -rf "$tmpLocation"/__MACOSX
+# fi
 
 # thread pool
 thread_num=8
@@ -109,7 +116,9 @@ counter=0 # num of PNGs
 
 startProcessingImg=$(date +%s)
 echo "Processing img alpha channels..."
-for file in "$tmpLocation"/"$(ls "$tmpLocation")"/*.png; do # doing $(ls "$tmpLocation") in case the file path contains non ascii chars
+for file in "$tmpLocation"/"$(# doing $(ls "$tmpLocation") in case the file path contains non ascii chars
+  ls "$tmpLocation"
+)"/*.png; do
   {
     read -r -u6
     if ! identify -format '%[channels]' "$file" | grep -q 'a'; then
@@ -153,6 +162,13 @@ fi
 echo "Waiting for two processes to finish"
 wait
 
+dir=$5
+
+if [ -z "$5" ]; then
+  echo "no output location specified, use . as location"
+  dir="./$1.mp4"
+fi
+
 echo "Generating result video now..."
 $ffmpeg -i "$tmpLocation/alpha.mov" -i "$tmpLocation/rgb.mov" \
   -filter_complex "[0:v]pad=iw*2:ih[int]; [int][1:v]overlay=W/2:0[vid]" \
@@ -160,13 +176,30 @@ $ffmpeg -i "$tmpLocation/alpha.mov" -i "$tmpLocation/rgb.mov" \
   -c:v libx264 \
   -crf 23 \
   -y \
-  "$1.mp4" &>/dev/null
-
+  "$dir" &>/dev/null
 wait
+
+if [[ -n "$6" ]]; then
+  echo "checking audio file"
+  audioFile=$6
+  if [[ "$audioFile" != *aac ]]; then
+    echo "unsupported audio file, ignored"
+  else
+    mv "$dir" "$dir temp.mp4"
+    $ffmpeg -i "$dir temp.mp4" \
+      -i "$audioFile" \
+      -c copy \
+      -map 0:v:0 \
+      -map 1:a:0 \
+      "$dir" &>/dev/null
+    rm "$dir temp.mp4"
+  fi
+fi
+
 echo "Purging tmp files..."
 rm -r "$tmpLocation"
 
 echo "Job done! File:"
-echo "$(pwd)/$1.mp4"
+echo "$dir"
 
 exit 0
